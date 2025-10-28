@@ -1,0 +1,69 @@
+mutation LandedCost($partyCreateWorkflowInputs: [PartyCreateWorkflowInput!]!, $itemCreateWorkflowInputs: [ItemCreateWorkflowInput!]!, $shipmentRatingCreateWorkflowInput: ShipmentRatingCreateWorkflowInput!, $landedCostCalculateWorkflowInput: LandedCostWorkFlowInput!) {
+  partyCreateWorkflow(input: $partyCreateWorkflowInputs) {
+    id
+  }
+  itemCreateWorkflow(input: $itemCreateWorkflowInputs) {
+    id
+    productId
+    sku
+  }
+  cartonizeWorkflow{id}
+  shipmentRatingCreateWorkflow(input: $shipmentRatingCreateWorkflowInput) {
+    id
+  }
+  landedCostCalculateWorkflow(input: $landedCostCalculateWorkflowInput) {
+    id
+    amountSubtotals {
+        duties
+        fees
+        taxes
+    }
+    currencyCode
+    shipmentRating{
+          amount
+      }
+    duties {
+      amount
+      currencyCode
+      formula
+      note
+      type
+      description
+      item {
+          id
+          amount
+          countryOfOrigin
+          currencyCode
+          hsCode
+          measurements {
+              unitOfMeasure
+              value
+              type
+          }
+          quantity
+      }
+    }
+    fees {
+      amount
+      currencyCode
+      description
+      formula
+      note
+      type
+    }
+    taxes {
+      amount
+      currencyCode
+      description
+      formula
+      note
+      type
+    }
+    remittance {
+        amount
+        description
+        note
+    }
+    landedCostGuaranteeCode
+  }
+}
