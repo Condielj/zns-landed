@@ -141,6 +141,9 @@ def csv_to_landed_costs(
 
         return df, landed_costs, row_to_req_map
 
+    else:
+        raise NotImplementedError("Postal mode not implemented yet")  # TODO
+
 
 def landed(
     csv_file: str, postal_mode: bool = False, env: Union[Environment, str] = "prod"
