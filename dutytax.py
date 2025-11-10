@@ -3,7 +3,7 @@ import json
 import httpx
 import asyncio
 
-from typing import Union
+from typing import Union, Optional
 
 LEVY_UNITS = {
     "weight_in_": "weight",
@@ -79,6 +79,8 @@ class Item:
         self.duty_rate = None
         self.applied_levies = None
         self.referenced_units_of_measure = None
+        self.tax_rate = None
+        self.applied_taxes = None
 
     def to_graphql_item(self) -> dict:
         attributes = []
@@ -137,12 +139,14 @@ class LandedCost:
         self,
         ship_to_country: str,
         ship_from_country: str,
+        ship_to_postal_code: Optional[str] = None,
         is_postal: bool = False,
         items: list[Item] = [],
     ):
         # Inputs
         self.ship_to_country = ship_to_country.strip().upper()
         self.ship_from_country = ship_from_country.strip().upper()
+        self.ship_to_postal_code = ship_to_postal_code
         self.is_postal = is_postal
         self.items = items
 
@@ -173,6 +177,10 @@ class LandedCost:
             location["administrativeAreaCode"] = (
                 "QC" if self.ship_to_country == "CA" else "CE"
             )
+
+        elif self.ship_to_country == "US":
+            if self.ship_to_postal_code:
+                location["postalCode"] = self.ship_to_postal_code
 
         destination_party = {
             "type": "DESTINATION",
@@ -239,8 +247,16 @@ class LandedCost:
 
         return response
 
-    def process_items(self, env: Union[Environment, str]) -> list[Item]:
-        data = asyncio.run(self._request(env))["data"]
+    async def process_items(self, env: Union[Environment, str]) -> list[Item]:
+        if isinstance(env, str):
+            env = Environment(env)
+
+        response = await self._request(env)
+
+        if "errors" in response.keys():
+            raise Exception(response["errors"])
+
+        data = response["data"]
 
         for item in self.items:
             # Get item id by matching productId
@@ -249,9 +265,11 @@ class LandedCost:
                     item_id = item_data["id"]
                     break
 
-            # Find the duties for this item
+            # Find the duties and taxes for this item
             total_duties = 0
+            total_taxes = 0
             applied_levies = []
+            applied_taxes = []
             referenced_units_of_measure = []
 
             for duty in data["landedCostCalculateWorkflow"][0]["duties"]:
@@ -271,6 +289,22 @@ class LandedCost:
 
             item.duty_rate = total_duties / item.item_amount
             item.applied_levies = applied_levies
+            item.referenced_units_of_measure = referenced_units_of_measure
+
+            # Get taxes for this item
+            for tax in data["landedCostCalculateWorkflow"][0]["taxes"]:
+                if tax["item"]["id"] == item_id:
+                    total_taxes += tax["amount"]
+                    applied_taxes.append(tax["description"])
+                    for measure in LEVY_UNITS.keys():
+                        if (
+                            measure in tax["formula"]
+                            and LEVY_UNITS[measure] not in referenced_units_of_measure
+                        ):
+                            referenced_units_of_measure.append(LEVY_UNITS[measure])
+
+            item.tax_rate = total_taxes / item.item_amount
+            item.applied_taxes = applied_taxes
             item.referenced_units_of_measure = referenced_units_of_measure
 
         return self.items

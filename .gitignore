@@ -210,3 +210,4 @@ __marimo__/
 *.csv
 !test_input.csv
 !expected_output.csv
+*.pem

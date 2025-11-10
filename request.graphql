@@ -58,6 +58,13 @@ mutation LandedCost($partyCreateWorkflowInputs: [PartyCreateWorkflowInput!]!, $i
       formula
       note
       type
+      item {
+        id
+        amount
+        countryOfOrigin
+        currencyCode
+        hsCode
+      }
     }
     remittance {
         amount

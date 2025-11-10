@@ -1,9 +1,11 @@
 import hashlib
-
-import pandas as pd
-
 from collections import OrderedDict
 from typing import Tuple, Dict, List, Union
+
+import asyncio
+import pandas as pd
+from tqdm import tqdm
+
 from dutytax import Environment, LandedCost, Item
 
 
@@ -16,6 +18,14 @@ def validate_input(df: pd.DataFrame) -> pd.DataFrame:
             )
 
     # Optional columns
+    if "ship_to_postal_code" not in df.columns:
+        print(
+            "Could not find a column called 'ship_to_postal_code' in the input file, US taxes will not be available."
+        )
+    else:
+        # Cast postal codes to strings (sometimes they get read in as ints)
+        df["ship_to_postal_code"] = df["ship_to_postal_code"].astype(str)
+
     country_columns = [
         "ship_to_country",
         "ship_from_country",
@@ -81,13 +91,19 @@ def validate_input(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def csv_to_landed_costs(
-    csv_file: str, postal_mode: bool = False
+    csv_file: str, postal_mode: bool = False, include_taxes: bool = True
 ) -> Tuple[pd.DataFrame, List[LandedCost], Dict[int, Tuple[int, int]]]:
     landed_costs = []
-    df = validate_input(pd.read_csv(csv_file))
+    df = validate_input(
+        pd.read_csv(csv_file, keep_default_na=False, na_values=["", "N/A", "NULL"])
+    )
 
-    # Marshall requests
-    landed_cost_columns = ["ship_to_country", "ship_from_country"]
+    # Marshal requests
+    landed_cost_columns = [
+        "ship_to_country",
+        "ship_from_country",
+        "ship_to_postal_code",
+    ]
     item_columns = [
         "country_of_origin",
         "hs_code",
@@ -153,12 +169,47 @@ def landed(
 
     df, landed_costs, row_to_req_map = csv_to_landed_costs(csv_file, postal_mode)
 
-    processed_items_by_lc: List[List[Item]] = []
-    for lc in landed_costs:
-        processed_items_by_lc.append(lc.process_items(env=env))
+    async def run_all(lcs: List[LandedCost], env: Environment, concurrency: int = 20):
+        sem = asyncio.Semaphore(concurrency)
+
+        async def bound_process(idx: int, lc: LandedCost):
+            async with sem:
+                # return index to preserve order for row_to_req map alignment
+                res = await lc.process_items(env)
+                return idx, res
+
+        tasks = [
+            asyncio.create_task(bound_process(idx, lc)) for idx, lc in enumerate(lcs)
+        ]
+
+        results: List[List[Item]] = [None] * len(lcs)
+        for fut in tqdm(
+            asyncio.as_completed(tasks),
+            total=len(tasks),
+            desc="Making landed cost requests",
+            unit="req",
+        ):
+            idx, res = await fut
+            results[idx] = res
+
+        return results
+
+    processed_items_by_lc: List[List[Item]] = asyncio.run(
+        run_all(landed_costs, env, concurrency=20)
+    )
+
+    print(
+        f"Done! Processed {len(processed_items_by_lc)} landed costs.  Preparing output..."
+    )
 
     # Initialize output columns
-    output_columns = ["duty_rate", "applied_levies", "referenced_units_of_measure"]
+    output_columns = [
+        "duty_rate",
+        "applied_levies",
+        "tax_rate",
+        "applied_taxes",
+        "referenced_units_of_measure",
+    ]
     for col in output_columns:
         df[col] = None
 
@@ -178,6 +229,8 @@ def landed(
 
         # Pull attributes
         duty_rate = item.duty_rate
+        tax_rate = item.tax_rate
+        applied_taxes = item.applied_taxes
         applied_levies = item.applied_levies
         referenced_units_of_measure = item.referenced_units_of_measure
 
@@ -188,6 +241,14 @@ def landed(
         except (TypeError, ValueError):
             df.at[row_idx, "duty_rate"] = None
 
+        try:
+            df.at[row_idx, "tax_rate"] = (
+                float(tax_rate) if tax_rate is not None else None
+            )
+        except (TypeError, ValueError):
+            df.at[row_idx, "tax_rate"] = None
+
+        df.at[row_idx, "applied_taxes"] = applied_taxes
         df.at[row_idx, "applied_levies"] = applied_levies
         df.at[row_idx, "referenced_units_of_measure"] = referenced_units_of_measure
 
@@ -198,5 +259,5 @@ def landed(
 
 
 if __name__ == "__main__":
-    landed(csv_file="test_input.csv", postal_mode=False, env="prod")
+    landed(csv_file="Result_4.csv", postal_mode=False, env="prod")
     print("Done")
