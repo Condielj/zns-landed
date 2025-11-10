@@ -1,3 +1,16 @@
 httpx
-python-dotenv
+asyncio
+
+#numpy==1.23.5
+#pandas==1.4
+#python-dotenv==0.20
+#SQLModel
+
+SQLAlchemy
+psycopg2-binary
+tqdm
+
+numpy
 pandas
+python-dotenv
+SQLModel
