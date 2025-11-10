@@ -23,6 +23,9 @@ def create_session(
     bastion_user: str,
     password: str,
     port: int,
+    host: str,
+    bastion_host: str,
+    database: str,
     drivername: str = "postgresql+psycopg2",
 ):
     engine = bastion_engine(
@@ -30,8 +33,9 @@ def create_session(
         bastion_user,
         password,
         port,
-        "landed_cost",
-        os.getenv("DB_URL"),
+        database,
+        host,
+        bastion_host,
         drivername,
     )
     session = Session(engine)
@@ -48,6 +52,7 @@ def bastion_engine(
     port: int,
     database: str,
     host: str,
+    bastion_host: str,
     drivername: str,
 ):
     sp.Popen(
@@ -58,7 +63,7 @@ def bastion_engine(
             "-N",
             "-L",
             f"127.0.0.1:19001:{host}:{port}",
-            f"{bastion_user}@{os.getenv('DB_BASTION_URL')}",
+            f"{bastion_user}@{bastion_host}",
             "-i",
             str(Path("zdops-bastion-prod.pem")),
         ]
@@ -279,7 +284,9 @@ def get_duty_formula_include_agreements(
     )
     duty_result = session.exec(duty_query).fetchall()
     if not duty_result:
-        raise Exception(f"No duty found for {hs_code} in {country} from levy.")
+        raise Exception(
+            f"No duty found for {hs_code} in {country} from levy.  Setting to 0% - double check!"
+        )
 
     # Check if there is just one duty
     if len(duty_result) == 1:
@@ -494,8 +501,10 @@ if __name__ == "__main__":
     multi_country_mode = True
 
     # Set column names here!
-    hs_code_column = "HS Code"  # Column is ignored for multi_country_mode
-    importer_country_column = "Ship To"
+    hs_code_column = (
+        "Country-specific HS codes"  # Column is ignored for multi_country_mode
+    )
+    importer_country_column = "Country-specific HS codes"
 
     # Set file name here!
     file_name = "WolfandBadger_TariffDatabase_V2_format_all_countries.csv"
@@ -509,7 +518,10 @@ if __name__ == "__main__":
         username=os.getenv("DB_USER"),
         bastion_user=os.getenv("BASTION_USER"),
         password=os.getenv("DB_PASS"),
+        host=os.getenv("DB_URL"),
+        bastion_host=os.getenv("DB_BASTION_URL"),
         port=5432,
+        database="landed_cost",
     ) as session:
         process_csv(
             multi_country_mode=multi_country_mode,
